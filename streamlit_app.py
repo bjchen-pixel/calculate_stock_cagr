@@ -1,81 +1,82 @@
+# Adjusted version of multi-stock comparison program
+
 import streamlit as st
-import yfinance as yf
-from datetime import datetime
 import pandas as pd
+import yfinance as yf
 import matplotlib.pyplot as plt
 
-def calculate_cagr_with_dividends(ticker, start_date, initial_investment):
-    """
-    Calculate the annualized return (CAGR) considering reinvested dividends
-    and generate a DataFrame tracking investment growth over time.
-    """
-    # Fetch stock data
-    stock = yf.Ticker(ticker)
-    hist_data = stock.history(start=start_date, actions=True)
-    
-    if hist_data.empty:
-        st.error("Invalid stock ticker or no data available for the given date range.")
-        return None, None, None
-    
-    # Filter price and dividends
-    prices = hist_data['Close']
-    dividends = hist_data['Dividends']
-    
-    if prices.empty:
-        st.error("No price data available for the given stock.")
-        return None, None, None
-    
-    # Initialize investment values
-    shares = initial_investment / prices.iloc[0]
-    total_investment = initial_investment
-    investment_growth = []  # To track investment value over time
-    
-    for date, price in prices.items():
-        # Track current value of investment
-        investment_growth.append({"Date": date, "Investment Value": shares * price})
-        if date in dividends.index and dividends[date] > 0:
-            # Reinvest dividends to buy more shares
-            total_dividends = shares * dividends[date]
-            new_shares = total_dividends / price
-            shares += new_shares
-    
-    # Final value of investment
-    final_value = shares * prices.iloc[-1]
+# Function to fetch stock data
+def fetch_stock_data(tickers, start_date, end_date, include_dividends=False):
+    data = yf.download(tickers, start=start_date, end=end_date)
+    if include_dividends:
+        dividend_data = yf.download(tickers, start=start_date, end=end_date, actions=True)['Dividends']
+        for ticker in tickers:
+            if ticker in dividend_data.columns:
+                data['Adj Close'][ticker] += dividend_data[ticker].cumsum()
+    return data['Adj Close']
 
-    # Convert start_date to a datetime object without timezone
-    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
-    # Convert end_date_obj to a naive datetime (remove timezone if exists)
-    end_date_obj = prices.index[-1].to_pydatetime().replace(tzinfo=None)
+# Function to calculate compound annual growth rate (CAGR)
+def calculate_cagr(start_value, end_value, num_years):
+    return (end_value / start_value) ** (1 / num_years) - 1
 
-    # Calculate CAGR
-    years = (end_date_obj - start_date_obj).days / 365.25
-    cagr = (final_value / initial_investment) ** (1 / years) - 1
+# Streamlit application
+st.title("Multi-Stock Comparison")
 
-    # Create DataFrame for investment growth
-    growth_df = pd.DataFrame(investment_growth)
-    growth_df['Date'] = pd.to_datetime(growth_df['Date'])
-    growth_df.set_index('Date', inplace=True)
+# User inputs
+stock_symbols = st.text_input("Enter stock symbols (comma-separated):", "AAPL, TSM, MSFT")
+start_date = st.date_input("Start Date", pd.to_datetime("2020-01-01"))
+end_date = st.date_input("End Date", pd.to_datetime("2023-01-01"))
+include_dividends = st.checkbox("Include Dividend Reinvestment", value=False)
+initial_investment = st.number_input("Initial Investment Amount (per stock):", min_value=0.0, value=1000.0)
 
-    return cagr, final_value, growth_df
-
-# Streamlit App
-st.title("Stock CAGR Calculator with Dividends")
-
-# User Inputs
-ticker = st.text_input("Enter the stock ticker (e.g., AAPL):").upper()
-start_date = st.date_input("Enter the start date of investment:", value=datetime(2019, 1, 1))
-initial_investment = st.number_input("Enter the initial investment amount (USD):", min_value=1.0, step=100.0)
-
-# Calculate CAGR
-if st.button("Calculate"):
-    if ticker and initial_investment > 0:
-        cagr, final_value, growth_df = calculate_cagr_with_dividends(ticker, str(start_date), initial_investment)
-        if cagr is not None:
-            st.success(f"Final Investment Value: ${final_value:,.2f}")
-            st.success(f"Annualized Return (CAGR) with Reinvested Dividends: {cagr:.2%}")
+if st.button("Compare Stocks"):
+    try:
+        tickers = [ticker.strip() for ticker in stock_symbols.split(',')]
+        stock_data = fetch_stock_data(tickers, start_date, end_date, include_dividends)
+        
+        # Check if stock_data is empty
+        if stock_data.empty:
+            st.error("No data available for the selected stocks and date range. Please try different inputs.")
+        else:
+            # Display raw adjusted close data
+            st.write("### Adjusted Close Price Data")
+            st.dataframe(stock_data)
             
-            # Plot investment growth curve
-            st.subheader("Investment Growth Over Time")
-            st.line_chart(growth_df, use_container_width=True)
-    else:
-        st.error("Please provide valid inputs.")
+            # Plot adjusted close prices
+            st.write("### Stock Price Over Time")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            for ticker in tickers:
+                if ticker in stock_data.columns:
+                    ax.plot(stock_data.index, stock_data[ticker], label=ticker)
+            ax.set_xlabel('Date')
+            ax.set_ylabel('Adjusted Close Price')
+            ax.set_title('Stock Prices Over Time')
+            ax.legend()
+            st.pyplot(fig)
+            
+            # Calculate and display CAGR for each stock
+            st.write("### CAGR for Each Stock")
+            cagr_results = {}
+            final_values = {}
+            for ticker in tickers:
+                if ticker in stock_data.columns:
+                    start_value = stock_data[ticker].iloc[0]
+                    end_value = stock_data[ticker].iloc[-1]
+                    num_years = (end_date - start_date).days / 365.25
+                    cagr = calculate_cagr(start_value, end_value, num_years)
+                    cagr_results[ticker] = cagr * 100
+                    final_values[ticker] = initial_investment * (end_value / start_value)
+            
+            cagr_df = pd.DataFrame.from_dict(cagr_results, orient='index', columns=['CAGR (%)'])
+            st.dataframe(cagr_df)
+            
+            # Display final investment values
+            st.write("### Final Investment Value for Each Stock")
+            final_values_df = pd.DataFrame.from_dict(final_values, orient='index', columns=['Final Value (USD)'])
+            st.dataframe(final_values_df)
+        
+    except Exception as e:
+        st.error(f"Error occurred: {e}")
+
+# Install dependencies: yfinance, pandas, streamlit, matplotlib
+# Run: pip install yfinance pandas streamlit matplotlib
