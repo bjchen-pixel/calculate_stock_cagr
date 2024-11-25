@@ -1,8 +1,7 @@
-# Adjusted version of multi-stock comparison program
-
 import streamlit as st
-import pandas as pd
 import yfinance as yf
+from datetime import datetime
+import pandas as pd
 import matplotlib.pyplot as plt
 
 # Function to fetch stock data
@@ -38,9 +37,18 @@ if st.button("Compare Stocks"):
         if stock_data.empty:
             st.error("No data available for the selected stocks and date range. Please try different inputs.")
         else:
-            # Display raw adjusted close data
-            st.write("### Adjusted Close Price Data")
-            st.dataframe(stock_data)
+            # Plot investment growth over time
+            st.write("### Investment Growth Over Time")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            for ticker in tickers:
+                if ticker in stock_data.columns:
+                    investment_values = initial_investment * (stock_data[ticker] / stock_data[ticker].iloc[0])
+                    ax.plot(stock_data.index, investment_values, label=f"{ticker} Investment Value")
+            ax.set_xlabel('Date')
+            ax.set_ylabel('Investment Value (USD)')
+            ax.set_title('Investment Growth Over Time')
+            ax.legend()
+            st.pyplot(fig)
             
             # Plot adjusted close prices
             st.write("### Stock Price Over Time")
@@ -53,6 +61,10 @@ if st.button("Compare Stocks"):
             ax.set_title('Stock Prices Over Time')
             ax.legend()
             st.pyplot(fig)
+            
+            # Display raw adjusted close data
+            st.write("### Adjusted Close Price Data")
+            st.dataframe(stock_data)
             
             # Calculate and display CAGR for each stock
             st.write("### CAGR for Each Stock")
